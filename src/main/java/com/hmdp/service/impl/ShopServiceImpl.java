@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit;
  *  服务实现类
  * </p>
  *
- * @author 虎哥
+ * @author 昊昊
  * @since 2021-12-22
  */
 @Service
@@ -40,10 +40,18 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
             Shop shop = JSONUtil.toBean(shopJson, Shop.class);
             return Result.ok(shop);
         }
+        //在这里需要判断redis里面是否是空值
+        if(shopJson.equals("")){
+            //如果是null
+            //直接返回店铺为空就行了
+            return Result.fail("该店铺不存在");
+        }
         //4.如果不存在，查询数据库
         Shop shop = getById(id);
         //5.如果数据库里面不存在，直接返回错误
         if(shop==null){
+            //如果数据库中不存在，做把空值存储到redis里面
+            stringRedisTemplate.opsForValue().set(key,"",RedisConstants.CACHE_NULL_TTL, TimeUnit.MINUTES);
             return Result.fail("该店铺不存在");
         }
         //6.如果存在，就写入redis，并且返回
