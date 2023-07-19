@@ -21,7 +21,7 @@ public class LoginInterceptor implements HandlerInterceptor {
             return false;
         }
         //如果这个用户登录过了，把user信息存入threadLocal，用于给该线程的controller进行使用
-        UserHolder.saveUser((User) user);
+        UserHolder.saveUser((UserDTO ) user);
         //放行
         return true;
     }
