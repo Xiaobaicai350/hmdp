@@ -54,12 +54,11 @@ public class ShopController {
      * 更新商铺信息
      * @param shop 商铺数据
      * @return 无
+     * 注意，这里只是后台有这个功能，但是我们还没做后台，直接用postman测试就可以了
      */
     @PutMapping
     public Result updateShop(@RequestBody Shop shop) {
-        // 写入数据库
-        shopService.updateById(shop);
-        return Result.ok();
+        return shopService.update(shop);
     }
 
     /**
