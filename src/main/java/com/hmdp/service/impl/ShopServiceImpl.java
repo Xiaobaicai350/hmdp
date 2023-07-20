@@ -98,6 +98,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
             //返回一个错误信息
             return null;
         }
+        //shopJson==null会走这个，因为没有从redis中查询出数据
         // 4.实现缓存重构
         //4.1 获取互斥锁
         String lockKey = "lock:shop:" + id;
