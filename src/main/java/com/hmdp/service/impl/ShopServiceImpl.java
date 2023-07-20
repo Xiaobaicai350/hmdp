@@ -2,8 +2,10 @@ package com.hmdp.service.impl;
 
 import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.hmdp.dto.Result;
+import com.hmdp.entity.RedisData;
 import com.hmdp.entity.Shop;
 import com.hmdp.mapper.ShopMapper;
 import com.hmdp.service.IShopService;
@@ -14,10 +16,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
+import java.time.LocalDateTime;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-import static com.hmdp.utils.RedisConstants.CACHE_NULL_TTL;
-import static com.hmdp.utils.RedisConstants.CACHE_SHOP_KEY;
+import static com.hmdp.utils.RedisConstants.*;
 
 /**
  * <p>
@@ -70,7 +74,13 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     //利用互斥锁解决缓存击穿问题
     @Override
     public Result queryById(Long id) {
-        Shop shop=queryWithMutex(id);
+        //利用互斥锁解决缓存击穿问题
+//        Shop shop=queryWithMutex(id);
+        //利用逻辑过期解决缓存击穿问题
+        Shop shop = queryWithLogicalExpire(id);
+        if(shop==null){
+            Result.fail("店铺不存在");
+        }
         return Result.ok(shop);
     }
     //利用互斥锁解决缓存击穿问题
@@ -128,12 +138,75 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         Boolean flag = stringRedisTemplate.opsForValue().setIfAbsent(key, "1", 10, TimeUnit.SECONDS);
         return BooleanUtil.isTrue(flag);
     }
-
     private void unlock(String key) {
         stringRedisTemplate.delete(key);
     }
 
 
+
+
+    //初始化线程池，用于新建线程用于重建数据
+    private static final ExecutorService CACHE_REBUILD_EXECUTOR = Executors.newFixedThreadPool(10);
+    public Shop queryWithLogicalExpire( Long id ) {
+        String key = CACHE_SHOP_KEY + id;
+        // 1.从redis查询商铺缓存，注意这里得到的是逻辑过期数据
+        String json = stringRedisTemplate.opsForValue().get(key);
+        // 2.判断是否存在
+        if (StrUtil.isBlank(json)) {
+            // 3.不存在，返回空
+            return null;
+        }
+        // 4.命中，需要先把json反序列化为对象
+        RedisData redisData = JSONUtil.toBean(json, RedisData.class);
+//        redisData.getData()这里得到的是一个Object对象，JSONUtil没有办法帮我们转换成Shop对象，需要我们手动转一下
+        Shop shop = JSONUtil.toBean((JSONObject) redisData.getData(), Shop.class);
+        //得到过期时间
+        LocalDateTime expireTime = redisData.getExpireTime();
+        // 5.判断是否过期
+        if(expireTime.isAfter(LocalDateTime.now())) {
+            // 5.1.未过期，直接返回店铺信息
+            return shop;
+        }
+        // 5.2.已过期，需要缓存重建
+        // 6.缓存重建
+        // 6.1.获取互斥锁
+        String lockKey = LOCK_SHOP_KEY + id;
+        boolean isLock = tryLock(lockKey);
+        // 6.2.判断是否获取锁成功
+        if (isLock){
+            //获取锁成功，进行重建缓存
+            CACHE_REBUILD_EXECUTOR.submit( ()->{
+                try{
+                    //重建缓存,并且设置逻辑过期，其实就是续了一段时间，并且更新了缓存里面的数据
+                    this.saveShop2Redis(id,20L);
+                }catch (Exception e){
+                    throw new RuntimeException(e);
+                }finally {
+                    unlock(lockKey);
+                }
+            });
+        }
+        // 6.4.返回过期的商铺信息
+        return shop;
+    }
+
+
+        /**
+         * 重建redis中的数据
+         * @param id 需要重建的店铺id
+         * @param expireSeconds 设置的逻辑过期时间
+         */
+    public void saveShop2Redis(Long id ,Long expireSeconds){
+        //查询重建的店铺数据
+        Shop shop = getById(id);
+        //封装带有逻辑过期时间的类
+        RedisData redisData = new RedisData();
+        redisData.setData(shop);
+        //设置过期时间为 当前时间加上传入的过期秒数
+        redisData.setExpireTime(LocalDateTime.now().plusSeconds(expireSeconds));
+        //把带有逻辑过期的数据存入redis
+        stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY+id,JSONUtil.toJsonStr(redisData));
+    }
 
 
 
