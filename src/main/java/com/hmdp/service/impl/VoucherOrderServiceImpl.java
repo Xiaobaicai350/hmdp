@@ -8,8 +8,10 @@ import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.RedisIdWorker;
+import com.hmdp.utils.SimpleRedisLock;
 import com.hmdp.utils.UserHolder;
 import org.springframework.aop.framework.AopContext;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +31,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     @Resource
     RedisIdWorker redisIdWorker;
+    @Resource
+    StringRedisTemplate stringRedisTemplate;
     @Resource
     ISeckillVoucherService seckillVoucherService;
     //抢购秒杀券方法，需要操作的表有订单表，优惠券表
@@ -53,13 +57,21 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             return Result.fail("库存不足了");
         }
         Long userId = UserHolder.getUser().getId();
-
-        //在这里加锁会出现问题，问题原因在于当前方法被spring的实物所控制，如果在方法内加锁，可能会导致当前方法的实物还没提交，但是锁已经被释放了
-        //因为加的锁是加在VoucherOrderServiceImpl的实体类上的，不是加在代理对象上的
-        synchronized(userId.toString().intern()) {
-            //这里用于获取原始的事务对象，来操作事务。
-            IVoucherOrderService proxy = (IVoucherOrderService)AopContext.currentProxy();
+        //创建锁对象(新增代码)
+        SimpleRedisLock lock = new SimpleRedisLock("order:" + userId, stringRedisTemplate);
+        //获取锁对象
+        boolean isLock = lock.tryLock(1200);
+        //加锁失败
+        if (!isLock) {
+            return Result.fail("不允许重复下单");
+        }
+        try {
+            //获取代理对象(事务)
+            IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy();
             return proxy.createVoucherOrder(voucherId);
+        } finally {
+            //释放锁
+            lock.unlock();
         }
     }
 
