@@ -55,6 +55,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                 .update()
                 .setSql("stock=stock-1")
                 .eq("voucher_id", voucherId)
+//                .eq("stock",voucher.getStock())//这里使用了cas思想。在修改的时候判断 库存数量 跟 之前查询的数量 相同才会更新数据库，要不然就不更新了。这样做的坏处是会有大批量失败。所以使用下面的方式进行优化
+                .gt("stock",0)//当大于0的时候不做判断，当库存数量等于0的时候再做这个判断
                 .update();
         if(!success){
             //说明更新失败了
