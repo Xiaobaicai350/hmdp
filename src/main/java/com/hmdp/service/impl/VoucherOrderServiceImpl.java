@@ -9,7 +9,9 @@ import com.hmdp.service.IVoucherOrderService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.RedisIdWorker;
 import com.hmdp.utils.UserHolder;
+import org.springframework.aop.framework.AopContext;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
@@ -46,19 +48,42 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             return Result.fail("秒杀已经结束！");
         }
         //4.判断库存是否充足
-        if(voucher.getStock()<1){
+        if (voucher.getStock() < 1) {
             //如果库存数量小于1，说明库存不足了
             return Result.fail("库存不足了");
         }
+        Long userId = UserHolder.getUser().getId();
+
+        //在这里加锁会出现问题，问题原因在于当前方法被spring的实物所控制，如果在方法内加锁，可能会导致当前方法的实物还没提交，但是锁已经被释放了
+        //因为加的锁是加在VoucherOrderServiceImpl的实体类上的，不是加在代理对象上的
+        synchronized(userId.toString().intern()) {
+            //这里用于获取原始的事务对象，来操作事务。
+            IVoucherOrderService proxy = (IVoucherOrderService)AopContext.currentProxy();
+            return proxy.createVoucherOrder(voucherId);
+        }
+    }
+
+    @Transactional
+    public Result createVoucherOrder(Long voucherId) {
+        Long userId = UserHolder.getUser().getId();
+        // 5.一人一单逻辑
+        // 5.1.用户id
+        int count = query().eq("user_id", userId).eq("voucher_id", voucherId).count();
+        // 5.2.判断是否存在
+        if (count > 0) {
+            // 用户已经购买过了
+            return Result.fail("用户已经购买过一次！");
+        }
+
         // 说明还有库存，操作库存
         boolean success = seckillVoucherService
                 .update()
                 .setSql("stock=stock-1")
                 .eq("voucher_id", voucherId)
 //                .eq("stock",voucher.getStock())//这里使用了cas思想。在修改的时候判断 库存数量 跟 之前查询的数量 相同才会更新数据库，要不然就不更新了。这样做的坏处是会有大批量失败。所以使用下面的方式进行优化
-                .gt("stock",0)//当大于0的时候不做判断，当库存数量等于0的时候再做这个判断
+                .gt("stock", 0)//当大于0的时候不做判断，当库存数量等于0的时候再做这个判断
                 .update();
-        if(!success){
+        if (!success) {
             //说明更新失败了
             return Result.fail("库存不足");
         }
@@ -71,4 +96,5 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         save(voucherOrder);
         return Result.ok(orderId);
     }
+
 }
