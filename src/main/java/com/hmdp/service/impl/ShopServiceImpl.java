@@ -41,7 +41,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
             return Result.ok(shop);
         }
         //在这里需要判断redis里面是否是空值
-        if(shopJson!=null){//不为null的时候为空
+        if(shopJson!=null){//不为null的时候为空（这里可能有些难理解，debug一下就可以看出来了，当shopJson为""字符串的时候才会进入这里面）
             //如果是空
             //直接返回店铺为空就行了
             return Result.fail("该店铺不存在");
