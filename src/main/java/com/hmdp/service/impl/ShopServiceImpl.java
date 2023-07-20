@@ -147,12 +147,15 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
     //初始化线程池，用于新建线程用于重建数据
     private static final ExecutorService CACHE_REBUILD_EXECUTOR = Executors.newFixedThreadPool(10);
+    //注意，在使用这个的时候，需要先往redis里面增加数据，之后才能进行逻辑过期的更新，，因为这些热点key的话，是需要提前加入到redis里面的
     public Shop queryWithLogicalExpire( Long id ) {
         String key = CACHE_SHOP_KEY + id;
         // 1.从redis查询商铺缓存，注意这里得到的是逻辑过期数据
         String json = stringRedisTemplate.opsForValue().get(key);
         // 2.判断是否存在
         if (StrUtil.isBlank(json)) {
+            //这里说明之前就没有这条缓存数据，我们知道，热点key需要提前的时候存入redis中
+            //如果这里不存在，说明这个就不是热点key，我们也没有查询的必要了
             // 3.不存在，返回空
             return null;
         }
