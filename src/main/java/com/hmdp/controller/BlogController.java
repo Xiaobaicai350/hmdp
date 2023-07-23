@@ -34,10 +34,14 @@ public class BlogController {
 
     @PostMapping
     public Result saveBlog(@RequestBody Blog blog) {
-
         return blogService.saveBlog(blog);
     }
 
+    @GetMapping("/of/follow")
+    public Result queryBlogOfFollow(
+            @RequestParam("lastId") Long max, @RequestParam(value = "offset", defaultValue = "0") Integer offset){
+        return blogService.queryBlogOfFollow(max, offset);
+    }
     @PutMapping("/like/{id}")
     public Result likeBlog(@PathVariable("id") Long id) {
 //        // 修改点赞数量
