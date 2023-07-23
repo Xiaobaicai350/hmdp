@@ -71,7 +71,6 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
 
 
-    //利用互斥锁解决缓存击穿问题
     @Override
     public Result queryById(Long id) {
         //利用互斥锁解决缓存击穿问题
