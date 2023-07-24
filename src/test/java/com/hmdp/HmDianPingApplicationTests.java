@@ -54,4 +54,22 @@ class HmDianPingApplicationTests {
             stringRedisTemplate.opsForGeo().add(key, locations);
         }
     }
+//    测试百万数据的统计
+    @Test
+    void testHyperLogLog(){
+        String[] users = new String[1000];
+        int index=0;
+        for(int i=1;i<=1000000;i++){
+            users[index++]="user_"+i;
+            //每1000条发送一次
+            if(i%10000==0){
+                //给index归零
+                index=0;
+                stringRedisTemplate.opsForHyperLogLog().add("hll1",users);
+            }
+        }
+        //统计数量
+        Long size=stringRedisTemplate.opsForHyperLogLog().size("hll1");
+        System.out.println("size="+size);
+    }
 }
