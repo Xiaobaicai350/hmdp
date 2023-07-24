@@ -70,6 +70,8 @@ class HmDianPingApplicationTests {
         }
         //统计数量
         Long size=stringRedisTemplate.opsForHyperLogLog().size("hll1");
+        //打印出来的结果是997593条,因为每一个用户的key都不一样，一共有10000000个用户，这样的误差是可以接收的
+        //但是特别在意这个误差的话就不能用这个了
         System.out.println("size="+size);
     }
 }
