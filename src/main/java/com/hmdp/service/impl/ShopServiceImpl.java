@@ -5,6 +5,9 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.google.common.base.Charsets;
+import com.google.common.hash.BloomFilter;
+import com.google.common.hash.Funnels;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.RedisData;
 import com.hmdp.entity.Shop;
@@ -23,6 +26,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
+import java.nio.charset.Charset;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
@@ -81,10 +85,10 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
     @Override
     public Result queryById(Long id) {
-        //利用互斥锁解决缓存击穿问题
-//        Shop shop=queryWithMutex(id);
+        //用缓存空值的方式解决缓存穿透问题，并且利用互斥锁解决缓存击穿问题，并且使用了随机TTL解决缓存雪崩的问题
+        Shop shop=queryWithMutex(id);
         //利用逻辑过期解决缓存击穿问题
-        Shop shop = queryWithLogicalExpire(id);
+//        Shop shop = queryWithLogicalExpire(id);
         if(shop==null){
             Result.fail("店铺不存在");
         }
@@ -94,7 +98,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     public Shop queryWithMutex(Long id)  {
         String key = CACHE_SHOP_KEY + id;
         // 1、从redis中查询商铺缓存
-        String shopJson = stringRedisTemplate.opsForValue().get("key");
+        String shopJson = stringRedisTemplate.opsForValue().get(key);
         // 2、判断是否存在
         if (StrUtil.isNotBlank(shopJson)) {
             // 存在,直接返回
@@ -109,14 +113,16 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         // 4.实现缓存重构
         //4.1 获取互斥锁
         String lockKey = "lock:shop:" + id;
-        Shop shop = null;
+        Shop shop ;
         try {
             boolean isLock = tryLock(lockKey);//这里设置锁的key为lock:shop+id
             // 4.2 判断否获取成功
             if(!isLock){
                 //4.3 失败，则休眠重试
-                Thread.sleep(50);
-                //这里可能有点难以理解，是递归调用，执行到这里之后会有两个结果，一个是正处于缓存重建，一个是重建完了，可以直接获取缓存了
+                Thread.sleep(150);
+                //这里可能有点难以理解，是递归调用，
+                // 执行到这里之后会有两个结果，
+                // 一个是正处于缓存重建，一个是重建完了，可以直接获取缓存了
                 return queryWithMutex(id);//进行递归调用
             }
             //4.4 成功，根据id查询数据库
@@ -128,10 +134,12 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
                 //返回错误信息
                 return null;
             }
+            Random random = new Random();
+            long randomTTL = random.nextInt(5)+1;
             //6.写入redis，
             //这里是重建过程
-            stringRedisTemplate.opsForValue().set(key,JSONUtil.toJsonStr(shop),CACHE_NULL_TTL,TimeUnit.MINUTES);
-
+            //并且这里使用了随机TTL解决缓存雪崩的问题
+            stringRedisTemplate.opsForValue().set(key,JSONUtil.toJsonStr(shop),randomTTL,TimeUnit.MINUTES);
         }catch (Exception e){
             throw new RuntimeException(e);
         }
