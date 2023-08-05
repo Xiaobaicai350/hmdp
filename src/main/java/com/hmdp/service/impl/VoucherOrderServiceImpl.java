@@ -156,6 +156,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 //        }
 //    }
 
+    //这个类用来监听redis中的stream队列中的数据，并且进行处理
     private class VoucherOrderHandler implements Runnable {
 
         @Override
@@ -184,69 +185,66 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                 } catch (Exception e) {
                     log.error("处理订单异常", e);
                     //处理异常消息
-                    handlePendingList();
-                }
-            }
-        }
-
-        private void handlePendingList() {
-            while (true) {
-                try {
-                    // 1.获取pending-list中的订单信息 XREADGROUP GROUP g1 c1 COUNT 1 BLOCK 2000 STREAMS s1 0
-                    List<MapRecord<String, Object, Object>> list = stringRedisTemplate.opsForStream().read(
-                            Consumer.from("g1", "c1"),
-                            StreamReadOptions.empty().count(1),
-                            StreamOffset.create("stream.orders", ReadOffset.from("0"))
-                    );
-                    // 2.判断订单信息是否为空
-                    if (list == null || list.isEmpty()) {
-                        // 如果为null，说明没有异常消息，结束循环
-                        break;
-                    }
-                    // 解析数据
-                    MapRecord<String, Object, Object> record = list.get(0);
-                    Map<Object, Object> value = record.getValue();
-                    VoucherOrder voucherOrder = BeanUtil.fillBeanWithMap(value, new VoucherOrder(), true);
-                    // 3.创建订单
-                    createVoucherOrder(voucherOrder);
-                    // 4.确认消息 XACK
-                    stringRedisTemplate.opsForStream().acknowledge("s1", "g1", record.getId());
-                } catch (Exception e) {
-                    log.error("处理pendding订单异常", e);
-                    try{
-                        Thread.sleep(20);
-                    }catch(Exception ex){
-                        ex.printStackTrace();
+                    while (true) {
+                        try {
+                            // 1.获取pending-list中的订单信息 XREADGROUP GROUP g1 c1 COUNT 1 BLOCK 2000 STREAMS s1 0
+                            List<MapRecord<String, Object, Object>> list = stringRedisTemplate.opsForStream().read(
+                                    Consumer.from("g1", "c1"),
+                                    StreamReadOptions.empty().count(1),
+                                    StreamOffset.create("stream.orders", ReadOffset.from("0"))
+                            );
+                            // 2.判断订单信息是否为空
+                            if (list == null || list.isEmpty()) {
+                                // 如果为null，说明没有异常消息，结束循环
+                                break;
+                            }
+                            // 解析数据
+                            MapRecord<String, Object, Object> record = list.get(0);
+                            Map<Object, Object> value = record.getValue();
+                            VoucherOrder voucherOrder = BeanUtil.fillBeanWithMap(value, new VoucherOrder(), true);
+                            // 3.创建订单
+                            createVoucherOrder(voucherOrder);
+                            // 4.确认消息 XACK
+                            stringRedisTemplate.opsForStream().acknowledge("s1", "g1", record.getId());
+                        } catch (Exception e1) {
+                            log.error("处理pendding订单异常", e);
+                            try{
+                                Thread.sleep(20);
+                            }catch(Exception ex){
+                                ex.printStackTrace();
+                            }
+                        }
                     }
                 }
             }
         }
     }
 
-    private void handleVoucherOrder(VoucherOrder voucherOrder) {
-        //1.获取用户
-        Long userId = voucherOrder.getUserId();
-        // 2.创建锁对象
-        RLock redisLock = redissonClient.getLock("lock:order:" + userId);
-        // 3.尝试获取锁
-        boolean isLock = redisLock.tryLock();
-        // 4.判断是否获得锁成功
-        if (!isLock) {
-            // 获取锁失败，直接返回失败或者重试
-            log.error("不允许重复下单！");
-            return;
-        }
-        try {
-            //注意：由于是spring的事务是放在threadLocal中，此时的是多线程，事务会失效
-            proxy.createVoucherOrder(voucherOrder);
-        } finally {
-            // 释放锁
-            redisLock.unlock();
-        }
-    }
+//    private void handleVoucherOrder(VoucherOrder voucherOrder) {
+//        //1.获取用户
+//        Long userId = voucherOrder.getUserId();
+//        // 2.创建锁对象
+//        RLock redisLock = redissonClient.getLock("lock:order:" + userId);
+//        // 3.尝试获取锁
+//        boolean isLock = redisLock.tryLock();
+//        // 4.判断是否获得锁成功
+//        if (!isLock) {
+//            // 获取锁失败，直接返回失败或者重试
+//            log.error("不允许重复下单！");
+//            return;
+//        }
+//        try {
+//            //注意：由于是spring的事务是放在threadLocal中，此时的是多线程，事务会失效
+//            proxy.createVoucherOrder(voucherOrder);
+//        } finally {
+//            // 释放锁
+//            redisLock.unlock();
+//        }
+//    }
     @Transactional
     public  void createVoucherOrder(VoucherOrder voucherOrder) {
         Long userId = voucherOrder.getUserId();
+        //这里其实是又做了一次安全性校验
         // 5.1.查询订单
         int count = query().eq("user_id", userId).eq("voucher_id", voucherOrder.getVoucherId()).count();
         // 5.2.判断是否存在
