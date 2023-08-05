@@ -38,7 +38,7 @@ import java.util.concurrent.Executors;
  *  服务实现类
  * </p>
  *
- * @author 虎哥
+ * @author 昊昊
  * @since 2021-12-22
  */
 @Service
@@ -110,8 +110,10 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         long orderId = redisIdWorker.nextId("order");
         // 1.执行lua脚本
         Long result = stringRedisTemplate.execute(
+                //需要执行的脚本
                 SECKILL_SCRIPT,
                 Collections.emptyList(),
+                //下面是传入的参数
                 voucherId.toString(), userId.toString(), String.valueOf(orderId)
         );
         int r = result.intValue();
